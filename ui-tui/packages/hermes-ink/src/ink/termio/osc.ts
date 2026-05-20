@@ -308,6 +308,18 @@ export async function setClipboard(text: string): Promise<ClipboardResult> {
 // Cached after first attempt so repeated mouse-ups skip the probe chain.
 let linuxCopy: 'wl-copy' | 'xclip' | 'xsel' | null | undefined
 
+/** Per-tool copy arguments: wl-copy reads stdin, xclip/xsel need clipboard flags. */
+function linuxCopyArgs(tool: 'wl-copy' | 'xclip' | 'xsel'): string[] {
+  switch (tool) {
+    case 'wl-copy':
+      return []
+    case 'xclip':
+      return ['-selection', 'clipboard']
+    case 'xsel':
+      return ['--clipboard', '--input']
+  }
+}
+
 /** Internal: probe once and cache — wl-copy first, then xclip, then xsel. */
 async function probeLinuxCopy(): Promise<'wl-copy' | 'xclip' | 'xsel' | null> {
   // resolveOnExit: wl-copy daemonizes and the daemon inherits stdio pipes,
@@ -370,7 +382,7 @@ function copyNative(text: string): boolean {
         }
 
         // linuxCopy is a known-working tool; fire-and-forget.
-        void execFileNoThrow(linuxCopy, linuxCopy === 'wl-copy' ? [] : ['-selection', 'clipboard'], opts)
+        void execFileNoThrow(linuxCopy, linuxCopyArgs(linuxCopy), opts)
 
         return true
       }
@@ -391,7 +403,7 @@ function copyNative(text: string): boolean {
 
         // Actually perform the copy with the discovered tool.
         if (winner) {
-          void execFileNoThrow(winner, winner === 'wl-copy' ? [] : ['-selection', 'clipboard'], opts)
+          void execFileNoThrow(winner, linuxCopyArgs(winner), opts)
         }
       })()
 

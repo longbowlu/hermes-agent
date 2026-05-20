@@ -8,9 +8,13 @@ type ExecFileOptions = {
    *  stdio streams to close. Use this for tools that fork a daemon and
    *  let the daemon inherit the parent's stdio (e.g. `wl-copy`): the
    *  child exits immediately, but `'close'` never fires because the
-   *  daemon holds the pipes open. The caller must not depend on
-   *  collecting stdout/stderr from that point on — only what arrived
-   *  before exit is included in the resolved value. */
+   *  daemon holds the pipes open.
+   *
+   *  When true, stdout and stderr are set to 'ignore' to prevent the
+   *  daemon from inheriting those pipe FDs — the caller must not
+   *  depend on collecting stdout/stderr content. Only what arrived
+   *  before exit is included in the resolved value (typically empty
+   *  since the child exits immediately). */
   resolveOnExit?: boolean
 }
 
@@ -25,10 +29,19 @@ export function execFileNoThrow(
   error?: string
 }> {
   return new Promise(resolve => {
+    // When resolveOnExit is true, ignore stdout/stderr so the daemon
+    // doesn't inherit those pipe FDs — prevents handle leaks that can
+    // keep the parent process alive. We still collect any data that
+    // arrives before exit, but typically there's none (the whole point
+    // is the child exits immediately while a daemon holds the selection).
+    const stdioConfig = options.resolveOnExit
+      ? ['pipe', 'ignore', 'ignore'] as const
+      : 'pipe' as const
+
     const child = spawn(file, args, {
       cwd: options.useCwd ? process.cwd() : undefined,
       env: options.env,
-      stdio: 'pipe'
+      stdio: stdioConfig
     })
 
     let stdout = ''
@@ -46,6 +59,11 @@ export function execFileNoThrow(
       if (timer) {
         clearTimeout(timer)
       }
+
+      // Destroy any remaining streams to release FDs promptly.
+      // After settle(), nobody reads from these anymore.
+      child.stdout?.destroy()
+      child.stderr?.destroy()
 
       resolve({ stdout, stderr, code, ...(error ? { error } : {}) })
     }
